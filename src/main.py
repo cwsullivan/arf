@@ -1,31 +1,27 @@
 import argparse
 import zlib
+import numpy as np
+import reedsolo
+
+RS = reedsolo.RSCodec(16)
 
 def compress_and_duplicate(raw_data, n):
     compressed_data = zlib.compress(raw_data)
 
-    # Compute error correction codes for compressed data
-    crc = zlib.crc32(compressed_data)
-
-    # Convert the CRC value to bytes
-    crc_bytes = crc.to_bytes(4, byteorder='big')
-
     # Convert the compressed binary string to bytes
     compressed_data_bytes = bytes(compressed_data)
 
-    # Create array with compressed data and error codes
-    data_array = [compressed_data_bytes, crc_bytes]
-
+    # Compute error correction codes for compressed data
+    data_array = RS.encode(compressed_data_bytes)
+    
     # Duplicate data array N times
-    arf_data = [data_array] * n
+    arf_data = data_array * n
 
-    # Flatten the list of arrays
-    arf_data_flat = [item for sublist in arf_data for item in sublist]
-
-    return arf_data_flat
+    return arf_data
 
 
 def uncompress_and_recover(arf_data, n):
+
     # Create redundant arrays from input data
     stride = int(len(arf_data) / n)
     redundant_arrays = [arf_data[idx*stride : (idx+1)*stride] for idx in range(n)]
@@ -37,19 +33,19 @@ def uncompress_and_recover(arf_data, n):
         most_common_value = max(set(index_values), key=index_values.count)
         recovered_data.append(most_common_value)
 
-    # Split recovered data into compressed data and error codes
-    compressed_data = bytes(recovered_data[:-4])
-    crc = bytes(recovered_data[-4:])
-
     # Check and correct errors in compressed data
-    recovered_crc = zlib.crc32(compressed_data)
-    if recovered_crc != int.from_bytes(crc, byteorder='big'):
-        print("Warning: error detected and corrected in compressed data")
-    else:
-        print("No errors detected in compressed data")
+    try:
+        # Decode compressed data with Reed-Solomon code
+        corrected_data, _, corrections = RS.decode(recovered_data)
 
-    # Unzip compressed data to recover original data
-    raw_data = zlib.decompress(compressed_data)
+        # Unzip compressed data to recover original data
+        raw_data = zlib.decompress(corrected_data)
+
+        print(f"Errors ({len(corrections)}) detected and corrected in compressed data")
+    except reedsolo.ReedSolomonError as e:
+        # Error could not be corrected
+        print("Error detected and could not be corrected:", str(e))
+        return None
 
     return raw_data
 
@@ -73,12 +69,20 @@ if __name__ == "__main__":
         # Compress and duplicate input file
         output_data = compress_and_duplicate(input_data, args.n)
         with open(args.output_file, 'wb') as f:
-            for output in output_data:
-                f.write(bytes(output))
+            f.write(output_data)
 
     elif args.mode == 'decode':
+        flip_percent = 0.30
+        L = len(input_data)
+        print(f'Corrupting {int(flip_percent*100)} percent ({int(flip_percent * L)} bits) of data...')
+        flip_indices = np.random.rand(L) < flip_percent
+        data = np.array(bytearray(input_data))
+        data[flip_indices] = (np.random.rand(sum(flip_indices))*255).astype(int)
+        corrupt_data = bytes(data)
+        print('Done corrupting data..')
+
         # Recover original data and save to output file
-        output_data = uncompress_and_recover(input_data, args.n)
+        output_data = uncompress_and_recover(corrupt_data, args.n)
         with open(args.output_file, 'wb') as f:
             f.write(output_data)
     
