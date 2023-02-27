@@ -1,0 +1,13 @@
+[package]
+name = "Arf"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "arf"
+path = "src/main.rs"
+
+[dependencies]
+arrayvec = "0.7.2"
+reed-solomon-erasure = "3.0.0"
+zip = "0.5.11"
